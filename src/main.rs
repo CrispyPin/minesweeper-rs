@@ -9,6 +9,7 @@ enum Action {
 	Win,
 	Quit,
 }
+
 enum Direction {
 	Up,
 	Down,
@@ -23,7 +24,6 @@ fn main() {
 	game.draw(&stdout);
 
 	loop {
-
 		let action = game.process_key(stdout.read_key().expect("failed to read key"));
 		game.draw(&stdout);
 		match action {
@@ -169,7 +169,6 @@ impl MSGame {
 					}
 				}
 			}
-
 			i += 1;
 		}
 		
@@ -307,13 +306,13 @@ impl Tile {
 			visibility: TileVis::Hidden
 		}
 	}
+
 	fn new_void() -> Self {
 		Self {
 			contents: TileContents::Void,
 			visibility: TileVis::Open,
 		}
 	}
-
 
 	fn draw(&self) -> String {
 		match &self.visibility {
