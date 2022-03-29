@@ -1,5 +1,7 @@
 use console::Term;
 use console::Key;
+use rand::prelude::SliceRandom;
+use rand::thread_rng;
 
 const NEIGHBOR_OFFSETS:[(i32, i32); 8] = [(-1,-1),(0,-1),(1,-1),(-1,0),(1,0),(-1,1),(0,1),(1,1)];
 
@@ -19,7 +21,7 @@ enum Direction {
 
 fn main() {
 	let stdout = Term::buffered_stdout();
-	let mut game = MSGame::new(16, 16);
+	let mut game = MSGame::new(16, 16, 32);
 	game.init();
 	game.draw(&stdout);
 
@@ -52,10 +54,16 @@ struct MSGame {
 }
 
 impl MSGame {
-	fn new(width: usize, height: usize) -> Self {
+	fn new(width: usize, height: usize, mines: u32) -> Self {
 		let size = width * height;
 		let mut board = Vec::<Tile>::with_capacity(size);
-		board.resize_with(size, || {Tile::new()});
+		let empty_tiles = (size as u32 - mines) as usize;
+		board.resize_with(empty_tiles, || {Tile::new(false)});
+		for _ in 0..mines {
+			board.push(Tile::new(true));
+		}
+		board.shuffle(&mut thread_rng());
+
 		
 		Self {
 			cursor_x: 0,
@@ -64,7 +72,7 @@ impl MSGame {
 			height,
 			board,
 			flags: 0,
-			mines: 0,
+			mines,
 		}
 	}
 
@@ -78,6 +86,9 @@ impl MSGame {
 						let x = x as usize;
 						let y = y as usize;
 						
+						if !self.valid_pos(x, y) {
+							continue;
+						}
 						let mut tile = self.get(x, y);
 						if let TileContents::Number(count) = tile.contents {
 							tile.contents = TileContents::Number(count + 1);
@@ -85,7 +96,6 @@ impl MSGame {
 						}
 
 					}
-					self.mines += 1;
 				}
 			}
 		}
@@ -118,7 +128,6 @@ impl MSGame {
 					},
 					TileVis::Hidden => {
 						if let TileContents::Number(_) = tile.contents {
-							//unexplored space that is safe
 							explored = false;
 						}
 					},
@@ -249,7 +258,7 @@ impl MSGame {
 
 	fn get(&self, x: usize, y: usize) -> Tile {
 		if !self.valid_pos(x, y) {
-			return Tile::new_void();
+			panic!("invalid get pos");
 		}
 		let i = self.index_of(x, y);
 		self.board[i]
@@ -282,7 +291,6 @@ struct Tile {
 enum TileContents {
 	Number(u8),
 	Mine,
-	Void,//out of bounds
 }
 
 #[derive(Copy, Clone)]
@@ -294,23 +302,15 @@ enum TileVis {
 
 
 impl Tile {
-	fn new() -> Self {
-		let contents = if rand::random::<f32>() > 0.85 {
+	fn new(mine: bool) -> Self {
+		let contents = if mine {
 			TileContents::Mine
 		} else {
 			TileContents::Number(0)
 		};
-
 		Self {
 			contents,
 			visibility: TileVis::Hidden
-		}
-	}
-
-	fn new_void() -> Self {
-		Self {
-			contents: TileContents::Void,
-			visibility: TileVis::Open,
 		}
 	}
 
@@ -322,7 +322,6 @@ impl Tile {
 					TileContents::Mine => "*".into(),
 					TileContents::Number(0) => " ".into(),
 					TileContents::Number(num) => format!("{}", num),
-					TileContents::Void => "MARKED AS OUT OF BOUNDS".into(),
 				}
 			},
 			TileVis::Flag => "F".into(),
