@@ -1,3 +1,6 @@
+use std::ops::Add;
+use std::ops::Rem;
+
 use console::Term;
 use console::Key;
 use rand::prelude::SliceRandom;
@@ -201,20 +204,20 @@ impl MSGame {
 	}
 
 	fn move_cursor(&mut self, direction: Direction) {
-		let mut x = self.cursor_x as i32;
-		let mut y = self.cursor_y as i32;
-
 		match direction {
-			Direction::Up	=> y -= 1,
-			Direction::Down	=> y += 1,
-			Direction::Left	=> x -= 1,
-			Direction::Right=> x += 1,
+			Direction::Up	=> self.cursor_y = self.cursor_y
+				.wrapping_sub(1)
+				.min(self.height - 1),
+			Direction::Down	=> self.cursor_y = self.cursor_y
+				.add(1)
+				.rem(self.height),
+			Direction::Left	=> self.cursor_x = self.cursor_x
+				.wrapping_sub(1)
+				.min(self.width - 1),
+			Direction::Right=> self.cursor_x = self.cursor_x
+				.add(1)
+				.rem(self.width),
 		}
-
-		x = (x + self.width as i32) % self.width as i32;
-		y = (y + self.height as i32) % self.height as i32;
-		self.cursor_x = x as usize;
-		self.cursor_y = y as usize;
 	}
 
 	fn draw(&self, stdout: &Term) {
