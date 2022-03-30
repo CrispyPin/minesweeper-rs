@@ -3,12 +3,13 @@ use std::ops::Rem;
 
 use console::Term;
 use console::Key;
+
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
 
-const NEIGHBOR_OFFSETS:[(i32, i32); 8] = [(-1,-1),(0,-1),(1,-1),(-1,0),(1,0),(-1,1),(0,1),(1,1)];
+const NEIGHBOR_OFFSETS: [(i32, i32); 8] = [(-1,-1),(0,-1),(1,-1),(-1,0),(1,0),(-1,1),(0,1),(1,1)];
 
-enum Action {
+enum TurnResult {
 	Continue,
 	Lose,
 	Win,
@@ -32,16 +33,16 @@ fn main() {
 		let action = game.process_key(stdout.read_key().expect("failed to read key"));
 		game.draw(&stdout);
 		match action {
-			Action::Quit => break,
-			Action::Lose => {
+			TurnResult::Quit => break,
+			TurnResult::Lose => {
 				println!("GAME OVER!");
 				break;
 			},
-			Action::Win => {
+			TurnResult::Win => {
 				println!("YOU WIN!");
 				break;
 			},
-			Action::Continue => (),
+			TurnResult::Continue => (),
 		}
 	}
 }
@@ -52,15 +53,17 @@ struct MSGame {
 	cursor_x: usize,
 	cursor_y: usize,
 	board: Vec<Tile>,
-	mines: u32,
-	flags: u32,
+	mines: usize,
+	flags: usize,
 }
 
 impl MSGame {
-	fn new(width: usize, height: usize, mines: u32) -> Self {
+	fn new(width: usize, height: usize, mines: usize) -> Self {
 		let size = width * height;
 		let mut board = Vec::<Tile>::with_capacity(size);
-		let empty_tiles = (size as u32 - mines) as usize;
+		
+		let empty_tiles = size.saturating_sub(mines);
+
 		board.resize_with(empty_tiles, || {Tile::new(false)});
 		for _ in 0..mines {
 			board.push(Tile::new(true));
@@ -85,17 +88,16 @@ impl MSGame {
 				let tile = self.get(center_x, center_y);
 				if let TileContents::Mine = tile.contents {
 					for (dx, dy) in NEIGHBOR_OFFSETS {
-						let (x, y) = (dx + center_x as i32, dy + center_y as i32);
-						let x = x as usize;
-						let y = y as usize;
+						let x = center_x.wrapping_add(dx as usize);
+						let y = center_y.wrapping_add(dy as usize);
 						
 						if !self.valid_pos(x, y) {
 							continue;
 						}
-						let mut tile = self.get(x, y);
+						
+						let tile = self.get_mut(x, y);
 						if let TileContents::Number(count) = tile.contents {
 							tile.contents = TileContents::Number(count + 1);
-							self.set(x, y, tile);
 						}
 
 					}
@@ -104,7 +106,7 @@ impl MSGame {
 		}
 	}
 
-	fn process_key(&mut self, key: Key) -> Action{
+	fn process_key(&mut self, key: Key) -> TurnResult{
 		match key {
 			Key::ArrowUp    => self.move_cursor(Direction::Up),
 			Key::ArrowLeft  => self.move_cursor(Direction::Left),
@@ -112,13 +114,13 @@ impl MSGame {
 			Key::ArrowRight => self.move_cursor(Direction::Right),
 			Key::Char('f') => self.flag(),
 			Key::Char(' ') => self.open(),
-			Key::Char('q') => return Action::Quit,
+			Key::Char('q') => return TurnResult::Quit,
 			_ => (),
 		}
 		self.state()
 	}
 
-	fn state(&self) -> Action {
+	fn state(&self) -> TurnResult {
 		let mut explored = true;
 		for y in 0..self.height {
 			for x in 0..self.width {
@@ -126,7 +128,7 @@ impl MSGame {
 				match tile.visibility {
 					TileVis::Open => {
 						if let TileContents::Mine = tile.contents {
-							return Action::Lose;
+							return TurnResult::Lose;
 						}
 					},
 					TileVis::Hidden => {
@@ -139,10 +141,10 @@ impl MSGame {
 			}
 		}
 		if explored {
-			Action::Win
+			TurnResult::Win
 		}
 		else {
-			Action::Continue
+			TurnResult::Continue
 		}
 	}
 
@@ -154,30 +156,30 @@ impl MSGame {
 		}
 	}
 
+	// flood fill to open all adjacent clear tiles
 	fn open(&mut self) {
 		let mut queue = vec![(self.cursor_x, self.cursor_y)];
 		let mut i = 0;
-		loop {
-			if i >= queue.len() {
-				break;
-			}
+		
+		while i < queue.len() {
 			let (x, y) = queue[i];
 			let tile = self.get(x, y);
 			
 			if let TileVis::Hidden = tile.visibility {
 				self.open_single(x, y);
+				// if this tile is a 0, add its neighbors to the queue (if they are not already open)
 				if let TileContents::Number(0) = tile.contents {
-					for offset in NEIGHBOR_OFFSETS {
-						let tx = (x as i32 + offset.0) as usize; // negatives end up giant but that is fine for bound checking
-						let ty = (y as i32 + offset.1) as usize;
-						if !self.valid_pos(tx, ty) {
+					for (dx, dy) in NEIGHBOR_OFFSETS {
+						let target_x = x.wrapping_add(dx as usize);
+						let target_y = y.wrapping_add(dy as usize);
+						if !self.valid_pos(target_x, target_y) {
 							continue;
 						}
-						let target = self.get(tx, ty);
+						let target = self.get(target_x, target_y);
 						if let TileVis::Open = target.visibility {
 							continue;
 						}
-						queue.push((tx, ty));
+						queue.push((target_x, target_y));
 					}
 				}
 			}
@@ -221,40 +223,32 @@ impl MSGame {
 	}
 
 	fn draw(&self, stdout: &Term) {
-		stdout.clear_screen().expect("failed to clear");
-		stdout.flush().expect("failed to flush");
-		for y in 0..self.height {
-			if self.cursor_y == y {
-				cell_gap(self.cursor_x, -1);
-			} else {
-				print!(" ");
-			}
-			for x in 0..self.width {
-				let tile = self.get(x, y);
+		stdout.clear_screen().unwrap();
+		stdout.flush().unwrap();
 
-				if self.cursor_y == y {
-					print!("{}", tile.draw());
-					cell_gap(self.cursor_x, x as i32);
-				}
-				else {
-					print!("{} ", tile.draw());
-				}
+		for row in 0..self.height {
+			cell_gap(self.cursor_x, self.cursor_y, usize::MAX, row);
+			
+			for col in 0..self.width {
+				let tile = self.get(col, row);
+				
+				print!("{}", tile.draw());
+				cell_gap(self.cursor_x, self.cursor_y, col, row);
 			}
 			println!();
 		}
 		println!();
 		println!("Mines: {}, Flags: {}, Remaining: {}", self.mines, self.flags, self.mines - self.flags);
 
-		fn cell_gap(cursor_x: usize, x: i32) {
-			let cx = cursor_x as i32;
-			if cx == x {
-				print!(")");
-			}
-			else if cx == x + 1 {
-				print!("(");
-			}
-			else {
+		fn cell_gap(cursor_x: usize, cursor_y: usize, col: usize, row: usize) {
+			if cursor_y != row {
 				print!(" ");
+				return;
+			}
+			match cursor_x.wrapping_sub(col) {
+				1 => print!("("),
+				0 => print!(")"),
+				_ => print!(" "),
 			}
 		}
 	}
@@ -266,20 +260,20 @@ impl MSGame {
 		let i = self.index_of(x, y);
 		self.board[i]
 	}
-	
-	fn set(&mut self, x: usize, y: usize, tile: Tile) {
+
+	fn get_mut(&mut self, x: usize, y: usize) -> &mut Tile {
 		if !self.valid_pos(x, y) {
-			return;
+			panic!("invalid get pos");
 		}
 		let i = self.index_of(x, y);
-		self.board[i] = tile;
+		&mut self.board[i]
 	}
-
-	fn valid_pos(&self, x: usize, y: usize) -> bool{
+	
+	fn valid_pos(&self, x: usize, y: usize) -> bool {
 		x < self.width && y < self.height
 	}
 
-	fn index_of(&self, x: usize, y: usize) -> usize{
+	fn index_of(&self, x: usize, y: usize) -> usize {
 		x + y * self.width
 	}
 }
