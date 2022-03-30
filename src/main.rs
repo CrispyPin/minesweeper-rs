@@ -3,6 +3,7 @@ use std::ops::Rem;
 
 use console::Term;
 use console::Key;
+use console::style;
 
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
@@ -114,7 +115,7 @@ impl MSGame {
 			Key::ArrowRight => self.move_cursor(Direction::Right),
 			Key::Char('f') => self.flag(),
 			Key::Char(' ') => self.open(),
-			Key::Char('q') => return TurnResult::Quit,
+			Key::Escape	| Key::Char('q') => return TurnResult::Quit,
 			_ => (),
 		}
 		self.state()
@@ -231,14 +232,14 @@ impl MSGame {
 			
 			for col in 0..self.width {
 				let tile = self.get(col, row);
-				
-				print!("{}", tile.draw());
+				tile.draw();
 				cell_gap(self.cursor_x, self.cursor_y, col, row);
 			}
 			println!();
 		}
 		println!();
 		println!("Mines: {}, Flags: {}, Remaining: {}", self.mines, self.flags, self.mines - self.flags);
+		println!("Use arrow keys to move, space to open tiles, F to place flags");
 
 		fn cell_gap(cursor_x: usize, cursor_y: usize, col: usize, row: usize) {
 			if cursor_y != row {
@@ -311,17 +312,26 @@ impl Tile {
 		}
 	}
 
-	fn draw(&self) -> String {
-		match &self.visibility {
-			TileVis::Hidden => "#".into(),
+	fn draw(&self) {
+		let out = match self.visibility {
+			TileVis::Hidden => style("#".into()).dim(),
 			TileVis::Open => {
 				match self.contents {
-					TileContents::Mine => "*".into(),
-					TileContents::Number(0) => " ".into(),
-					TileContents::Number(num) => format!("{}", num),
+					TileContents::Mine => style("*".into()).black().on_red(),
+					TileContents::Number(0) => style(" ".into()),
+					TileContents::Number(num) => {
+						let n = style(num.to_string());
+						match num {
+							1 => n.green().dim(),
+							2 => n.cyan().bright(),
+							3 => n.yellow().bright(),
+							_ => n.magenta(),
+						}
+					} 
 				}
 			},
-			TileVis::Flag => "F".into(),
-		}
+			TileVis::Flag => style("F".into()).red().bright(),
+		};
+		print!("{}", out);
 	}
 }
