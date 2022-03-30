@@ -1,5 +1,6 @@
 use std::ops::Add;
 use std::ops::Rem;
+use std::time::SystemTime;
 
 use console::Term;
 use console::Key;
@@ -28,6 +29,7 @@ fn main() {
 	let stdout = Term::buffered_stdout();
 	let mut game = MSGame::new(16, 16, 32);
 	game.draw(&stdout);
+	let start_time = SystemTime::now();
 
 	loop {
 		let action = game.process_key(stdout.read_key().expect("failed to read key"));
@@ -45,6 +47,11 @@ fn main() {
 			TurnResult::Continue => (),
 		}
 	}
+	let time_taken = SystemTime::now()
+		.duration_since(start_time)
+		.unwrap()
+		.as_secs();
+	println!("Time taken: {}s", time_taken);
 }
 
 struct MSGame {
