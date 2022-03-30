@@ -27,7 +27,6 @@ enum Direction {
 fn main() {
 	let stdout = Term::buffered_stdout();
 	let mut game = MSGame::new(16, 16, 32);
-	game.init();
 	game.draw(&stdout);
 
 	loop {
@@ -71,8 +70,7 @@ impl MSGame {
 		}
 		board.shuffle(&mut thread_rng());
 
-		
-		Self {
+		let mut new_game = Self {
 			cursor_x: 0,
 			cursor_y: 0,
 			width,
@@ -80,14 +78,18 @@ impl MSGame {
 			board,
 			flags: 0,
 			mines,
-		}
+		};
+		new_game.count_neighbors();
+		new_game
 	}
 
-	fn init(&mut self) {
+	fn count_neighbors(&mut self) {
+		// count neighbors for all tiles
 		for center_y in 0..self.height {
 			for center_x in 0..self.width {
 				let tile = self.get(center_x, center_y);
 				if let TileContents::Mine = tile.contents {
+					// this tile is a mine so we add 1 to the counts of all neighboring empty tiles
 					for (dx, dy) in NEIGHBOR_OFFSETS {
 						let x = center_x.wrapping_add(dx as usize);
 						let y = center_y.wrapping_add(dy as usize);
@@ -97,8 +99,8 @@ impl MSGame {
 						}
 						
 						let tile = self.get_mut(x, y);
-						if let TileContents::Number(count) = tile.contents {
-							tile.contents = TileContents::Number(count + 1);
+						if let TileContents::Safe(count) = tile.contents {
+							tile.contents = TileContents::Safe(count + 1);
 						}
 
 					}
@@ -113,15 +115,15 @@ impl MSGame {
 			Key::ArrowLeft  => self.move_cursor(Direction::Left),
 			Key::ArrowDown  => self.move_cursor(Direction::Down),
 			Key::ArrowRight => self.move_cursor(Direction::Right),
-			Key::Char('f') => self.flag(),
-			Key::Char(' ') => self.open(),
+			Key::Char('f') => self.flag_tile(),
+			Key::Char(' ') => self.open_tile(),
 			Key::Escape	| Key::Char('q') => return TurnResult::Quit,
 			_ => (),
 		}
-		self.state()
+		self.check_board()
 	}
 
-	fn state(&self) -> TurnResult {
+	fn check_board(&mut self) -> TurnResult {
 		let mut explored = true;
 		for y in 0..self.height {
 			for x in 0..self.width {
@@ -129,11 +131,12 @@ impl MSGame {
 				match tile.visibility {
 					TileVis::Open => {
 						if let TileContents::Mine = tile.contents {
+							self.open_mines();
 							return TurnResult::Lose;
 						}
 					},
 					TileVis::Hidden => {
-						if let TileContents::Number(_) = tile.contents {
+						if let TileContents::Safe(_) = tile.contents {
 							explored = false;
 						}
 					},
@@ -149,7 +152,7 @@ impl MSGame {
 		}
 	}
 
-	fn open_single(&mut self, x: usize, y: usize) {
+	fn open_single_tile(&mut self, x: usize, y: usize) {
 		let i = self.index_of(x, y);
 		let tile = &mut self.board[i];
 		if let TileVis::Hidden = tile.visibility {
@@ -158,7 +161,7 @@ impl MSGame {
 	}
 
 	// flood fill to open all adjacent clear tiles
-	fn open(&mut self) {
+	fn open_tile(&mut self) {
 		let mut queue = vec![(self.cursor_x, self.cursor_y)];
 		let mut i = 0;
 		
@@ -167,9 +170,9 @@ impl MSGame {
 			let tile = self.get(x, y);
 			
 			if let TileVis::Hidden = tile.visibility {
-				self.open_single(x, y);
+				self.open_single_tile(x, y);
 				// if this tile is a 0, add its neighbors to the queue (if they are not already open)
-				if let TileContents::Number(0) = tile.contents {
+				if let TileContents::Safe(0) = tile.contents {
 					for (dx, dy) in NEIGHBOR_OFFSETS {
 						let target_x = x.wrapping_add(dx as usize);
 						let target_y = y.wrapping_add(dy as usize);
@@ -189,7 +192,15 @@ impl MSGame {
 		
 	}
 
-	fn flag(&mut self) {
+	fn open_mines(&mut self) {
+		for tile in &mut self.board {
+			if let TileContents::Mine = tile.contents {
+				tile.visibility = TileVis::Open;
+			}
+		}
+	}
+
+	fn flag_tile(&mut self) {
 		let i = self.index_of(self.cursor_x, self.cursor_y);
 		let tile = &mut self.board[i];
 
@@ -287,7 +298,7 @@ struct Tile {
 
 #[derive(Copy, Clone)]
 enum TileContents {
-	Number(u8),
+	Safe(u8),
 	Mine,
 }
 
@@ -304,7 +315,7 @@ impl Tile {
 		let contents = if mine {
 			TileContents::Mine
 		} else {
-			TileContents::Number(0)
+			TileContents::Safe(0)
 		};
 		Self {
 			contents,
@@ -318,8 +329,8 @@ impl Tile {
 			TileVis::Open => {
 				match self.contents {
 					TileContents::Mine => style("*".into()).black().on_red(),
-					TileContents::Number(0) => style(" ".into()),
-					TileContents::Number(num) => {
+					TileContents::Safe(0) => style(" ".into()),
+					TileContents::Safe(num) => {
 						let n = style(num.to_string());
 						match num {
 							1 => n.green().dim(),
